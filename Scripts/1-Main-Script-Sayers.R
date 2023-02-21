@@ -113,9 +113,27 @@ mean(residuals(SRmodel)) # VERY close to 0
 
 simulateResiduals(SRmodel, plot = T, refit = F, use.u = T)
 shapiro.test(residuals(SRmodel)) # W = 0.99464, p-value = 0.6516, normal!
-# residual plots look good
+# residual plots look okay
 
-# CANDIDATE MODEL SET ----------------------------------------------------------
+## Checking for autocorrelation/independence
+#acf(SpeciesRichnessWindow$Species.Richness.Window) # raw data is autocorrelated
+#acf(residuals(SRmodel)) # random effects variable corrects for this
+#runs.test(residuals(SRmodel)) # we do not have autocorrelated data
+#
+#library(DataCombine)
+#SpeciesRichnessWindow.lag <- data.frame(SpeciesRichnessWindow, resid.mod = residuals(SRmodel)) %>% 
+#  slide(Var = "resid.mod", NewVar = "lag1", slideBy = -1) %>% 
+#  na.omit()
+#
+#SRmodel.lag <- glmmTMB(Species.Richness.Window ~ Time.Window*Day*Site + lag1,
+#                   data = SpeciesRichnessWindow.lag, family = "gaussian", REML = F)
+#
+#acf(SpeciesRichnessWindow.lag$Species.Richness.Window) # raw data is autocorrelated
+#acf(residuals(SRmodel.lag)) # random effects variable corrects for this
+#runs.test(residuals(SRmodel.lag)) # we do not have autocorrelated data
+
+
+# MODEL SELECTION ---------------------------------------------------------
 SRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window*Day*Site,
                    data = SpeciesRichnessWindow, family = "gaussian", REML = F)
 
