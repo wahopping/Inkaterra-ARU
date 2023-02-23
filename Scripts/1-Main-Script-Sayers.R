@@ -1,6 +1,6 @@
 
 # Chris Sayers
-# updated February 20, 2023
+# updated February 22, 2023
 
 #---------------------- LOADING/MERGING THE DATA -------------------------------
 library(tidyverse)
@@ -11,10 +11,15 @@ SiteData <- read.csv("Spreadsheets/Site-Data.csv") %>%
   dplyr::select(Site, Day, Hab1, Hab2, Hab3, Edge.Distance) %>% 
   mutate(Day = as.factor(Day), Site = as.factor(Site))
 
-# pulling in annotation data to calculate species richness at each 5-minute interval
-# between 0600-0700
+# pulling in raw annotations from Raven Pro 1.5
 Annotations <- read.csv("Spreadsheets/All-Annotations.csv") %>% 
-  mutate(Day = as.factor(Day), Site = as.factor(Site)) %>% 
+  mutate(Day = as.factor(Day), Site = as.factor(Site),
+         Duration.s = End.Time..s. - Begin.Time..s.)
+ 
+# SPECIES RICHNESS --------------------------------------------------------
+
+# calculating species richness at each 5-minute interval between 0600-0700
+SR.Annotations <- Annotations %>% 
   mutate(Time.Window.Start = if_else(Begin.Time..s. >= 0 & Begin.Time..s. < 300, 1,
                                      if_else(Begin.Time..s. >= 300 & Begin.Time..s. < 600, 2,
                                      if_else(Begin.Time..s. >= 600 & Begin.Time..s. < 900, 3,
@@ -39,6 +44,78 @@ Annotations <- read.csv("Spreadsheets/All-Annotations.csv") %>%
                                      if_else(End.Time..s. >= 3000 & End.Time..s. < 3300, 11, 12)))))))))))) %>% 
   pivot_longer(c(Time.Window.Start, Time.Window.End),
                names_to = "Time.Window.Label", values_to = "Time.Window")
+
+SpeciesRichnessDay <- SR.Annotations %>% 
+  # excluding individuals that were not identified with 100% confidence
+  filter(exclusion.code <= 3) %>% 
+  # calculating species richness per day per site
+  group_by(Site, Day) %>% 
+  summarize(Species.Richness.Day = length(unique(species)))
+
+SpeciesRichnessWindow <- SR.Annotations %>% 
+  # excluding individuals that were not identified with 100% confidence
+  filter(exclusion.code <= 3) %>% 
+  # calculating species richness per time window per day per site
+  group_by(Site, Day, Time.Window) %>% 
+  summarize(Species.Richness.Window = length(unique(species)))
+
+# putting everything together
+WindowData <- left_join(SpeciesRichnessWindow, SiteData, by = c("Site", "Day"))
+
+
+# VOCAL PREVALENCE --------------------------------------------------------
+
+#for(i in nrow(Annotations)) {
+  
+#  if(Annotations[i,Begin.Time..s.] >= 0 & Annotations[i,Begin.Time..s.] < 300)
+  
+  
+#}
+
+
+
+# calculating vocal prevalence for each species at each 5-minute interval between 0600-0700
+
+# need to think through the less than/greater than signs more
+VP.Annotations <- Annotations %>%
+  mutate(VP.1 = if_else(Begin.Time..s. >= 0 & End.Time..s. <= 60, End.Time..s. - Begin.Time..s.,
+                if_else(Begin.Time..s. >= 0 & Begin.Time..s. <= 60 & End.Time..s. >= 60, 60 - Begin.Time..s., 0))) %>%
+  mutate(VP.2 = if_else(Begin.Time..s. <= 60 & End.Time..s. > 60 & End.Time..s. <= 120, End.Time..s. - 60,
+                        if_else(Begin.Time..s. >= 0 & Begin.Time..s. <= 60 & End.Time..s. >= 60, 60 - Begin.Time..s., 0)))
+  
+                        
+                        
+                        
+                        
+                        
+                        )
+  
+  
+  mutate(Time.Window.Start = if_else(Begin.Time..s. >= 0 & Begin.Time..s. < 300, 1,
+                             if_else(Begin.Time..s. >= 300 & Begin.Time..s. < 600, 2,
+                             if_else(Begin.Time..s. >= 600 & Begin.Time..s. < 900, 3,
+                             if_else(Begin.Time..s. >= 900 & Begin.Time..s. < 1200, 4,
+                             if_else(Begin.Time..s. >= 1200 & Begin.Time..s. < 1500, 5,
+                             if_else(Begin.Time..s. >= 1500 & Begin.Time..s. < 1800, 6,
+                             if_else(Begin.Time..s. >= 1800 & Begin.Time..s. < 2100, 7,
+                             if_else(Begin.Time..s. >= 2100 & Begin.Time..s. < 2400, 8,
+                             if_else(Begin.Time..s. >= 2400 & Begin.Time..s. < 2700, 9,
+                             if_else(Begin.Time..s. >= 2700 & Begin.Time..s. < 3000, 10,
+                             if_else(Begin.Time..s. >= 3000 & Begin.Time..s. < 3300, 11, 12)))))))))))) %>%
+  mutate(Time.Window.End = if_else(End.Time..s. >= 0 & End.Time..s. < 300, 1,
+                           if_else(End.Time..s. >= 300 & End.Time..s. < 600, 2,
+                           if_else(End.Time..s. >= 600 & End.Time..s. < 900, 3,
+                           if_else(End.Time..s. >= 900 & End.Time..s. < 1200, 4,
+                           if_else(End.Time..s. >= 1200 & End.Time..s. < 1500, 5,
+                           if_else(End.Time..s. >= 1500 & End.Time..s. < 1800, 6,
+                           if_else(End.Time..s. >= 1800 & End.Time..s. < 2100, 7,
+                           if_else(End.Time..s. >= 2100 & End.Time..s. < 2400, 8,
+                           if_else(End.Time..s. >= 2400 & End.Time..s. < 2700, 9,
+                           if_else(End.Time..s. >= 2700 & End.Time..s. < 3000, 10,
+                           if_else(End.Time..s. >= 3000 & End.Time..s. < 3300, 11, 12))))))))))))
+  #mutate(Time.Window = if_else(Time.Window.Start == Time.Window.End, Time.Window.Start, ))
+  #pivot_longer(c(Time.Window.Start, Time.Window.End),
+  #             names_to = "Time.Window.Label", values_to = "Time.Window")
 
 SpeciesRichnessDay <- Annotations %>% 
   # excluding individuals that were not identified with 100% confidence
@@ -86,6 +163,9 @@ SRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window + Day + Site +
                      Time.Window*Day + Day*Site + Time.Window*Site + 
                      Time.Window*Day*Site,
                      data = WindowData, family = "gaussian", REML = F)
+
+SRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window*Day*Hab2 + (1 | Site),
+                   data = WindowData, family = "gaussian", REML = F)
 
 #SRmodel <- glmmTMB(Species.Richness.Window ~ Hab2 + Edge.Distance +
 #                     (1 | Day/Time.Window) + (1 | Site),
@@ -148,6 +228,12 @@ write.csv(d.out, "Outputs/sr-model-selection.csv")
 topSRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window + Day + Site + 
                      Day*Site + Time.Window*Site,
                    data = WindowData, family = "gaussian", REML = F)
+
+summary(topSRmodel)
+as.data.frame(confint(topSRmodel)) %>% 
+  mutate(Estimate = exp(Estimate), `2.5 %` = exp(`2.5 %`), `97.5 %` = exp(`97.5 %`))
+performance::r2(topSRmodel)
+car::Anova(topSRmodel, type = 3)
 
 # computing post-hoc comparisons to determine significant differences among the modeled means
 # need to switch model to be as.factor(Time.Window) first before performing this comparison
