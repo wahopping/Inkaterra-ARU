@@ -78,17 +78,16 @@ WindowData <- left_join(SpeciesRichnessWindow, SiteData, by = c("Site", "Day"))
 
 # need to think through the less than/greater than signs more
 VP.Annotations <- Annotations %>%
-  mutate(VP.1 = if_else(Begin.Time..s. >= 0 & End.Time..s. <= 60, End.Time..s. - Begin.Time..s.,
-                if_else(Begin.Time..s. >= 0 & Begin.Time..s. <= 60 & End.Time..s. >= 60, 60 - Begin.Time..s., 0))) %>%
-  mutate(VP.2 = if_else(Begin.Time..s. <= 60 & End.Time..s. > 60 & End.Time..s. <= 120, End.Time..s. - 60,
-                        if_else(Begin.Time..s. >= 0 & Begin.Time..s. <= 60 & End.Time..s. >= 60, 60 - Begin.Time..s., 0)))
-  
-                        
-                        
-                        
-                        
-                        
-                        )
+  mutate(VP.1 = if_else(End.Time..s. < 60, End.Time..s. - Begin.Time..s., # annotation lies completely inside window
+                if_else(Begin.Time..s. < 60 & End.Time..s. >= 60, 60 - Begin.Time..s., 0))) %>% # annotation only intersects higher window bound
+  mutate(VP.2 = if_else(Begin.Time..s. >= 60 & End.Time..s. < 120, End.Time..s. - Begin.Time..s., # annotation lies completely inside window
+                if_else(Begin.Time..s. < 60 & End.Time..s. >= 60 & End.Time..s. < 120, End.Time..s. - 60, # annotation only intersects lower window bound
+                if_else(Begin.Time..s. >= 60 & Begin.Time..s. < 120 & End.Time..s. >= 120, 120 - Begin.Time..s., # annotation only intersects higher window bound
+                if_else(Begin.Time..s. <= 60 & Begin.Time..s. >= 120, 60, 0))))) # annotation completely overlaps window
+
+
+
+
   
   
   mutate(Time.Window.Start = if_else(Begin.Time..s. >= 0 & Begin.Time..s. < 300, 1,
