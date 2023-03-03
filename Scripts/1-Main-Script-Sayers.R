@@ -6,9 +6,13 @@
 library(tidyverse)
 library(dplyr)
 
+# resolve namespace conflicts and creating necessary functions
+select <- dplyr::select
+"%nin%" <- Negate("%in%")
+
 # pulling in habitat information and community metrics calculated in Python
 SiteData <- read.csv("Spreadsheets/Site-Data.csv") %>%
-  dplyr::select(Site, Day, Hab1, Hab2, Hab3, Edge.Distance) %>% 
+  select(Site, Day, Hab1, Hab2, Hab3, Edge.Distance) %>% 
   mutate(Day = as.factor(Day), Site = as.factor(Site))
 
 # pulling in raw annotations from Raven Pro 1.5
@@ -18,213 +22,62 @@ Annotations <- read.csv("Spreadsheets/All-Annotations.csv") %>%
  
 # SPECIES RICHNESS --------------------------------------------------------
 
-# calculating species richness at each 1-minute interval between 0600-0700
-#for(i in nrow(Annotations)) {
-#  
-#  for(j in seq(0:60)) {
-#    
-#    if(Start >= (60*j) & End < (60*(j+1))){Annotations$SR.1 <- 1} # annotation lies completely within window
-#    else if(Start < (60*j) & End >= (60*j) & End < (60*(j+1))){Annotations$SR.1 <- } # annotation only intersects lower window bound
-#    else if(Start >= (60*j) & Start < (60*(j+1)) & End >= (60*(j+1))){Annotations$SR.1 <- } # annotation only intersects upper window bound
-#    else if(Start <= (60*j) & Start >= (60*(j+1))){Annotations$SR.1 <- }
-#    else {Annotations$SR.1 <- 0} # annotation does not overlap the window
-#      
-#    }
-#  }
-#}
+# calculating species richness at each 60 s interval between 0600-0700
+# creating a new data frame to populate
+SR.Annotations <- Annotations
 
+# defining the bounds of our windows and recording length
+window.start <- 0
+window.end <- 60
+window.length <- 60
+max.time <- 3600
 
+# initializing loop to calculate species richness at each 60 s interval between 0600-0700
+while(window.start < max.time) {
+  
+  # create a new column in df to populate with vocal presence/absence
+  SR.Annotations[, ncol(SR.Annotations) + 1] <- NA
+  names(SR.Annotations)[ncol(SR.Annotations)] <- paste0(window.end)
+  
+  for(i in 1:nrow(SR.Annotations)) {
+    if(((SR.Annotations$Start[i] >= window.start) & (SR.Annotations$End[i] < window.end)) | # annotation lies completely within window
+       ((SR.Annotations$Start[i] < window.start) & (SR.Annotations$End[i] >= window.start) & (SR.Annotations$End[i] < window.end)) | # annotation only intersects lower window bound
+       ((SR.Annotations$Start[i] >= window.start) & (SR.Annotations$Start[i] < window.end) & (SR.Annotations$End[i] >= window.end)) | #annotation only intersects upper window bound
+       ((SR.Annotations$Start[i] < window.start) & (SR.Annotations$End[i] >= window.end))) # annotation completely overlaps window
+    {SR.Annotations[i, ncol(SR.Annotations)] <- 1}
+    else {SR.Annotations[i, ncol(SR.Annotations)] <- 0}
+  }
+  # adjusting our counter
+  window.start <- window.start + window.length
+  window.end <- window.end + window.length
+  
+  # keep track of iteration
+  cat(paste("done with iteration", window.start, "\n"))
+}
 
-
-
-# calculating species richness at each 5-minute interval between 0600-0700
-SR.Annotations.5 <- Annotations %>% 
-  mutate(Time.Window.Start = if_else(Start >= (300*0) & Start < (300*1), 1,
-                             if_else(Start >= (300*1) & Start < (300*2), 2,
-                             if_else(Start >= (300*2) & Start < (300*3), 3,
-                             if_else(Start >= (300*3) & Start < (300*4), 4,
-                             if_else(Start >= (300*4) & Start < (300*5), 5,
-                             if_else(Start >= (300*5) & Start < (300*6), 6,
-                             if_else(Start >= (300*6) & Start < (300*7), 7,
-                             if_else(Start >= (300*7) & Start < (300*8), 8,
-                             if_else(Start >= (300*8) & Start < (300*9), 9,
-                             if_else(Start >= (300*9) & Start < (300*10), 10,
-                             if_else(Start >= (300*10) & Start < (300*11), 11, 12)))))))))))) %>%
-  mutate(Time.Window.End = if_else(End >= (300*0) & End < (300*1), 1,
-                           if_else(End >= (300*1) & End < (300*2), 2,
-                           if_else(End >= (300*2) & End < (300*3), 3,
-                           if_else(End >= (300*3) & End < (300*4), 4,
-                           if_else(End >= (300*4) & End < (300*5), 5,
-                           if_else(End >= (300*5) & End < (300*6), 6,
-                           if_else(End >= (300*6) & End < (300*7), 7,
-                           if_else(End >= (300*7) & End < (300*8), 8,
-                           if_else(End >= (300*8) & End < (300*9), 9,
-                           if_else(End >= (300*9) & End < (300*10), 10,
-                           if_else(End >= (300*10) & End < (300*11), 11, 12)))))))))))) %>% 
-  pivot_longer(c(Time.Window.Start, Time.Window.End), names_to = "Time.Window.Label", values_to = "Time.Window")
-
-SR.Day <- Annotations %>% 
-  # excluding individuals that were not identified with 100% confidence
-  filter(exclusion.code <= 3) %>% 
-  # calculating species richness per day per site
-  group_by(Site, Day) %>% 
-  summarize(Species.Richness.Day = length(unique(species)))
-
-SR.Window.5 <- SR.Annotations.5 %>% 
+# calculating species richness for each time window
+SR.Window <- SR.Annotations %>% 
+  pivot_longer(`60`:`3600`, names_to = "Time.Window", values_to = "Presence") %>%
   # excluding individuals that were not identified with 100% confidence
   filter(exclusion.code <= 3) %>% 
   # calculating species richness per time window per day per site
+  filter(Presence == 1) %>%
   group_by(Site, Day, Time.Window) %>% 
-  summarize(Species.Richness.Window = length(unique(species)))
+  summarize(SR = length(unique(Species)))
+
+# zero-filling data frame to represent absences
+SR.filler <- SR.Annotations %>% 
+  pivot_longer(`60`:`3600`, names_to = "Time.Window", values_to = "Presence") %>%
+  # excluding individuals that were not identified with 100% confidence
+  filter(exclusion.code <= 3) %>% 
+  select(Site, Day, Time.Window) %>% 
+  distinct()
 
 # putting everything together
-SR.Window.5 <- left_join(SR.Window.5, SiteData, by = c("Site", "Day"))
+SR.Window.60 <- left_join(SR.filler, SR.Window, by = c("Site", "Day", "Time.Window")) %>% 
+  mutate(SR = replace_na(SR, 0)) %>% 
+  left_join(SiteData, by = c("Site", "Day"))
 
-# calculating species richness at each 1-minute interval between 0600-0700
-#SR.Annotations.1 <- Annotations %>% 
-#  mutate(Time.Window.Start = if_else(Start >= (60*0) & Start < (60*1), 1,
-#                             if_else(Start >= (60*1) & Start < (60*2), 2,
-#                             if_else(Start >= (60*2) & Start < (60*3), 3,
-#                             if_else(Start >= (60*3) & Start < (60*4), 4,
-#                             if_else(Start >= (60*4) & Start < (60*5), 5,
-#                             if_else(Start >= (60*5) & Start < (60*6), 6,
-#                             if_else(Start >= (60*6) & Start < (60*7), 7,
-#                             if_else(Start >= (60*7) & Start < (60*8), 8,
-#                             if_else(Start >= (60*8) & Start < (60*9), 9,
-#                             if_else(Start >= (60*9) & Start < (60*10), 10,
-#                             if_else(Start >= (60*10) & Start < (60*11), 11,
-#                             if_else(Start >= (60*11) & Start < (60*12), 12,
-#                             if_else(Start >= (60*12) & Start < (60*13), 13,
-#                             if_else(Start >= (60*13) & Start < (60*14), 14,
-#                             if_else(Start >= (60*14) & Start < (60*15), 15,
-#                             if_else(Start >= (60*15) & Start < (60*16), 16,
-#                             if_else(Start >= (60*16) & Start < (60*17), 17,
-#                             if_else(Start >= (60*17) & Start < (60*18), 18,
-#                             if_else(Start >= (60*18) & Start < (60*19), 19,
-#                             if_else(Start >= (60*19) & Start < (60*20), 20,
-#                             if_else(Start >= (60*20) & Start < (60*21), 21,
-#                             if_else(Start >= (60*21) & Start < (60*22), 22,
-#                             if_else(Start >= (60*22) & Start < (60*23), 23,
-#                             if_else(Start >= (60*23) & Start < (60*24), 24,
-#                             if_else(Start >= (60*24) & Start < (60*25), 25,
-#                             if_else(Start >= (60*25) & Start < (60*26), 26,
-#                             if_else(Start >= (60*26) & Start < (60*27), 27,
-#                             if_else(Start >= (60*27) & Start < (60*28), 28,
-#                             if_else(Start >= (60*28) & Start < (60*29), 29,
-#                             if_else(Start >= (60*29) & Start < (60*30), 30,
-#                             if_else(Start >= (60*30) & Start < (60*31), 31,
-#                             if_else(Start >= (60*31) & Start < (60*32), 32,
-#                             if_else(Start >= (60*32) & Start < (60*33), 33,
-#                             if_else(Start >= (60*33) & Start < (60*34), 34,
-#                             if_else(Start >= (60*34) & Start < (60*35), 35,
-#                             if_else(Start >= (60*35) & Start < (60*36), 36,
-#                             if_else(Start >= (60*36) & Start < (60*37), 37,
-#                             if_else(Start >= (60*37) & Start < (60*38), 38,
-#                             if_else(Start >= (60*38) & Start < (60*39), 39,
-#                             if_else(Start >= (60*39) & Start < (60*40), 40,
-#                             if_else(Start >= (60*40) & Start < (60*41), 41,
-#                             if_else(Start >= (60*41) & Start < (60*42), 42,
-#                             if_else(Start >= (60*42) & Start < (60*43), 43,
-#                             if_else(Start >= (60*43) & Start < (60*44), 44,
-#                             if_else(Start >= (60*44) & Start < (60*45), 45,
-#                             if_else(Start >= (60*45) & Start < (60*46), 46,
-#                             if_else(Start >= (60*46) & Start < (60*47), 47,
-#                             if_else(Start >= (60*47) & Start < (60*48), 48,
-#                             if_else(Start >= (60*48) & Start < (60*49), 49,
-#                             if_else(Start >= (60*49) & Start < (60*50), 50,
-#                             if_else(Start >= (60*50) & Start < (60*51), 51,
-#                             if_else(Start >= (60*51) & Start < (60*52), 52,
-#                             if_else(Start >= (60*52) & Start < (60*53), 53,
-#                             if_else(Start >= (60*53) & Start < (60*54), 54,
-#                             if_else(Start >= (60*54) & Start < (60*55), 55,
-#                             if_else(Start >= (60*55) & Start < (60*56), 56,
-#                             if_else(Start >= (60*56) & Start < (60*57), 57,
-#                             if_else(Start >= (60*57) & Start < (60*58), 58,
-#                             if_else(Start >= (60*58) & Start < (60*59), 59, 60)
-#                             ))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) %>%
-#  mutate(Time.Window.End = if_else(End >= (60*0) & End < (60*1), 1,
-#                           if_else(End >= (60*1) & End < (60*2), 2,
-#                           if_else(End >= (60*2) & End < (60*3), 3,
-#                           if_else(End >= (60*3) & End < (60*4), 4,
-#                           if_else(End >= (60*4) & End < (60*5), 5,
-#                           if_else(End >= (60*5) & End < (60*6), 6,
-#                           if_else(End >= (60*6) & End < (60*7), 7,
-#                           if_else(End >= (60*7) & End < (60*8), 8,
-#                           if_else(End >= (60*8) & End < (60*9), 9,
-#                           if_else(End >= (60*9) & End < (60*10), 10,
-#                           if_else(End >= (60*10) & End < (60*11), 11,
-#                           if_else(End >= (60*11) & End < (60*12), 12,
-#                           if_else(End >= (60*12) & End < (60*13), 13,
-#                           if_else(End >= (60*13) & End < (60*14), 14,
-#                           if_else(End >= (60*14) & End < (60*15), 15,
-#                           if_else(End >= (60*15) & End < (60*16), 16,
-#                           if_else(End >= (60*16) & End < (60*17), 17,
-#                           if_else(End >= (60*17) & End < (60*18), 18,
-#                           if_else(End >= (60*18) & End < (60*19), 19,
-#                           if_else(End >= (60*19) & End < (60*20), 20,
-#                           if_else(End >= (60*20) & End < (60*21), 21,
-#                           if_else(End >= (60*21) & End < (60*22), 22,
-#                           if_else(End >= (60*22) & End < (60*23), 23,
-#                           if_else(End >= (60*23) & End < (60*24), 24,
-#                           if_else(End >= (60*24) & End < (60*25), 25,
-#                           if_else(End >= (60*25) & End < (60*26), 26,
-#                           if_else(End >= (60*26) & End < (60*27), 27,
-#                           if_else(End >= (60*27) & End < (60*28), 28,
-#                           if_else(End >= (60*28) & End < (60*29), 29,
-#                           if_else(End >= (60*29) & End < (60*30), 30,
-#                           if_else(End >= (60*30) & End < (60*31), 31,
-#                           if_else(End >= (60*31) & End < (60*32), 32,
-#                           if_else(End >= (60*32) & End < (60*33), 33,
-#                           if_else(End >= (60*33) & End < (60*34), 34,
-#                           if_else(End >= (60*34) & End < (60*35), 35,
-#                           if_else(End >= (60*35) & End < (60*36), 36,
-#                           if_else(End >= (60*36) & End < (60*37), 37,
-#                           if_else(End >= (60*37) & End < (60*38), 38,
-#                           if_else(End >= (60*38) & End < (60*39), 39,
-#                           if_else(End >= (60*39) & End < (60*40), 40,
-#                           if_else(End >= (60*40) & End < (60*41), 41,
-#                           if_else(End >= (60*41) & End < (60*42), 42,
-#                           if_else(End >= (60*42) & End < (60*43), 43,
-#                           if_else(End >= (60*43) & End < (60*44), 44,
-#                           if_else(End >= (60*44) & End < (60*45), 45,
-#                           if_else(End >= (60*45) & End < (60*46), 46,
-#                           if_else(End >= (60*46) & End < (60*47), 47,
-#                           if_else(End >= (60*47) & End < (60*48), 48,
-#                           if_else(End >= (60*48) & End < (60*49), 49,
-#                           if_else(End >= (60*49) & End < (60*50), 50,
-#                           if_else(End >= (60*50) & End < (60*51), 51,
-#                           if_else(End >= (60*51) & End < (60*52), 52,
-#                           if_else(End >= (60*52) & End < (60*53), 53,
-#                           if_else(End >= (60*53) & End < (60*54), 54,
-#                           if_else(End >= (60*54) & End < (60*55), 55,
-#                           if_else(End >= (60*55) & End < (60*56), 56,
-#                           if_else(End >= (60*56) & End < (60*57), 57,
-#                           if_else(End >= (60*57) & End < (60*58), 58,
-#                           if_else(End >= (60*58) & End < (60*59), 59, 60)
-#                           ))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) %>%
-#  pivot_longer(c(Time.Window.Start, Time.Window.End),
-#               names_to = "Time.Window.Label", values_to = "Time.Window")
-#
-#
-#
-#
-#SpeciesRichnessDay.1 <- SR.Annotations.1 %>% 
-#  # excluding individuals that were not identified with 100% confidence
-#  filter(exclusion.code <= 3) %>% 
-#  # calculating species richness per day per site
-#  group_by(Site, Day) %>% 
-#  summarize(Species.Richness.Day = length(unique(species)))
-#
-#SpeciesRichnessWindow.1 <- SR.Annotations.1 %>% 
-#  # excluding individuals that were not identified with 100% confidence
-#  filter(exclusion.code <= 3) %>% 
-#  # calculating species richness per time window per day per site
-#  group_by(Site, Day, Time.Window) %>% 
-#  summarize(Species.Richness.Window = length(unique(species)))
-#
-## putting everything together
-#WindowData.1 <- left_join(SpeciesRichnessWindow.1, SiteData, by = c("Site", "Day"))
-  
 # DATA VISUALIZATION ------------------------------------------------------
 library(ggpubr)
 library(MuMIn)
@@ -239,51 +92,37 @@ library(multcomp)
 # much of the strategy below is from Zurr et al. (2010)  https://doi.org/10.1111/j.2041-210X.2009.00001.x
 
 # OUTLIERS & NORMALITY OF RESPONSE VARIABLES -----------------------------------
-ggdensity(SR.Day$Species.Richness.Day, xlab = "Species Richness") # looks great
-ggqqplot(SR.Day$Species.Richness.Day, ylab = "Species Richness") # looks great
-shapiro.test(SR.Day$Species.Richness.Day) # W = 0.98469, p-value = 0.9854, normal
-
-ggdensity(SR.Window.5$Species.Richness.Window, xlab = "Species Richness") # looks great
-ggqqplot(SR.Window.5$Species.Richness.Window, ylab = "Species Richness") # tails stray from normal
-shapiro.test(SR.Window.5$Species.Richness.Window) # W = 0.98073, p-value = 0.005175, not normal
+ggdensity(SR.Window.60$SR, xlab = "Species Richness") # looks great
+gghistogram(SR.Window.60$SR, xlab = "Species Richness")
+ggqqplot(SR.Window.60$SR, ylab = "Species Richness") # tails stray from normal
+shapiro.test(SR.Window.60$SR) # W = 0.97989, p-value = 4.43e-11, not normal
 
 # SPECIES RICHNESS MODEL -------------------------------------------------------
 
-# unpacked structure of Time.Window*Day*Site
-SRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window + Day + Site + 
-                     Time.Window*Day + Day*Site + Time.Window*Site + 
-                     Time.Window*Day*Site,
-                     data = WindowData, family = "gaussian", REML = F)
+SRmodel.60 <- glmmTMB(SR ~ Time.Window + Day + Hab2 + Edge.Distance + (1 | Site),
+                        data = SR.Window.60, family = "poisson", REML = F)
 
-SRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window*Day*Hab2 + (1 | Site),
-                   data = WindowData, family = "gaussian", REML = F)
+SRmodel.60 <- glmmTMB(SR ~ Time.Window*Day + Hab2 + Edge.Distance + (1 | Site),
+                      data = SR.Window.60, family = "poisson", REML = F)
 
-#SRmodel <- glmmTMB(Species.Richness.Window ~ Hab2 + Edge.Distance +
-#                     (1 | Day/Time.Window) + (1 | Site),
-#                   data = WindowData, family = "gaussian", REML = F)
+performance::r2(SRmodel.60)
+car::Anova(SRmodel.60, type = 3)
 
-summary(SRmodel)
-as.data.frame(confint(SRmodel)) %>% 
+SRmodel.60 <- glmmTMB(SR ~ Time.Window*Day + Hab2 + Edge.Distance + (1 | Site),
+                     data = SR.Window.60, family = "poisson", REML = F)
+
+summary(SRmodel.60)
+as.data.frame(confint(SRmodel.60)) %>% 
   mutate(Estimate = exp(Estimate), `2.5 %` = exp(`2.5 %`), `97.5 %` = exp(`97.5 %`))
-performance::r2(SRmodel)
-car::Anova(SRmodel, type = 3)
-
-## global species richness model
-#SRmodel <- glmmTMB(Species.Richness.Day ~ Day*Site,
-#                   data = SpeciesRichnessDay, family = "gaussian", REML = F)
-#
-#summary(SRmodel)
-#as.data.frame(confint(SRmodel)) %>% 
-#  mutate(Estimate = exp(Estimate), `2.5 %` = exp(`2.5 %`), `97.5 %` = exp(`97.5 %`))
-#performance::r2(SRmodel)
-#car::Anova(SRmodel, type = 3)
+performance::r2(SRmodel.60)
+car::Anova(SRmodel.60, type = 3)
 
 # CHECKING MODEL ASSUMPTIONS -------------------------------------
 # Checking for homogeneity of variance & normality of residuals
-mean(residuals(SRmodel)) # VERY close to 0
+mean(residuals(SRmodel.60)) # VERY close to 0
 
-simulateResiduals(SRmodel, plot = T, refit = F, use.u = T)
-shapiro.test(residuals(SRmodel)) # W = 0.99464, p-value = 0.6516, normal!
+simulateResiduals(SRmodel.60, plot = T, refit = F, use.u = T)
+shapiro.test(residuals(SRmodel.60)) # W = 0.99464, p-value = 0.6516, normal!
 # residual plots look okay
 
 ## Checking for autocorrelation/independence
@@ -305,20 +144,19 @@ shapiro.test(residuals(SRmodel)) # W = 0.99464, p-value = 0.6516, normal!
 
 
 # MODEL SELECTION ---------------------------------------------------------
-SRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window*Day*Site,
-                   data = SpeciesRichnessWindow, family = "gaussian", REML = F)
+SRmodel.60 <- glmmTMB(SR ~ Time.Window + Day + Hab2 + (1 | Site),
+                      data = SR.Window.60, family = "poisson", REML = F)
 
 options(na.action = "na.fail")
 # computes marginal and conditional R^2
-d.out <- MuMIn::dredge(SRmodel, extra = list("Rsq" = function(x){performance::r2(x)}))
+d.out <- MuMIn::dredge(SRmodel.60, extra = list("Rsq" = function(x){performance::r2(x)}))
 View(d.out)
 options(na.action = "na.omit")
 write.csv(d.out, "Outputs/sr-model-selection.csv")
 
-# 1st place model by a long-shot (R2 = 0.92, wi = 71%)
-topSRmodel <- glmmTMB(Species.Richness.Window ~ Time.Window + Day + Site + 
-                     Day*Site + Time.Window*Site,
-                   data = WindowData, family = "gaussian", REML = F)
+# 1st place model by a long-shot (R2 = 0.61, wi = 72%)
+topSRmodel <- glmmTMB(SR ~ Time.Window + Day + Hab2 + (1 | Site),
+                      data = SR.Window.60, family = "poisson", REML = F)
 
 summary(topSRmodel)
 as.data.frame(confint(topSRmodel)) %>% 
@@ -334,13 +172,12 @@ emmeans(topSRmodel, "Time.Window", type = "response") %>%
 emmeans(topSRmodel, "Day", type = "response") %>% 
   cld(Letter = "abcdefg")
 
-emmeans(topSRmodel, "Site", type = "response") %>% 
+emmeans(topSRmodel, "Hab2", type = "response") %>% 
   cld(Letter = "abcdefg")
 
-# VOCAL PRESENCE --------------------------------------------------------
+# VOCAL PREVALENCE --------------------------------------------------------
 
-# calculating vocal presence for each species at 15 s time windows between 0600-0700
-
+# calculating vocal presence/absence for each species at 10 s time windows between 0600-0700
 # there are a total of 5 ways that an annotation can interact with a time window:
 # (1) the annotation lies completely within the window
 # (2) the annotation only intersects the lower window bound
@@ -348,138 +185,108 @@ emmeans(topSRmodel, "Site", type = "response") %>%
 # (4) the annotation completely overlaps the window
 # (5) the annotation lies completely outside the window
 
+# creating a new data frame to populate
+VP.Annotations <- Annotations
+
 # defining the bounds of our windows and recording length
 window.start <- 0
-window.end <- 15
+window.end <- 10
+window.length <- 10
 max.time <- 3600
+
+# initializing loop to calculate vocal presence/absence at each 10-second interval
+# between 0600-0700
+while(window.start < max.time) {
+  
+  # create a new column in df to populate with vocal presence/absence
+  VP.Annotations[, ncol(VP.Annotations) + 1] <- NA
+  names(VP.Annotations)[ncol(VP.Annotations)] <- paste0(window.end)
+  
+  for(i in 1:nrow(VP.Annotations)) {
+    if(((VP.Annotations$Start[i] >= window.start) & (VP.Annotations$End[i] < window.end)) | # annotation lies completely within window
+       ((VP.Annotations$Start[i] < window.start) & (VP.Annotations$End[i] >= window.start) & (VP.Annotations$End[i] < window.end)) | # annotation only intersects lower window bound
+       ((VP.Annotations$Start[i] >= window.start) & (VP.Annotations$Start[i] < window.end) & (VP.Annotations$End[i] >= window.end)) | #annotation only intersects upper window bound
+       ((VP.Annotations$Start[i] < window.start) & (VP.Annotations$End[i] >= window.end))) # annotation completely overlaps window
+    {VP.Annotations[i, ncol(VP.Annotations)] <- 1}
+    else {VP.Annotations[i, ncol(VP.Annotations)] <- 0}
+  }
+  # adjusting our counter
+  window.start <- window.start + window.length
+  window.end <- window.end + window.length
+  
+  # keep track of iteration
+  cat(paste("done with iteration", window.start, "\n"))
+}
+
+VP.Window <- VP.Annotations %>% 
+  pivot_longer(`10`:`3600`, names_to = "Time.Window", values_to = "VP") %>%
+  mutate(Time.Window = as.numeric(Time.Window)) %>%
+  # excluding individuals that were not identified with 100% confidence
+  filter(exclusion.code <= 3) %>%
+  group_by(Site, Day, Species, Time.Window) %>%
+  summarize(VP = max(VP)) %>% 
+  ## filtering by present species only to make the df easier to loop over
+  #filter(VP == 1)
+
+# zero-filling each site day according to all species detected at Inkaterra
+# dummy df of all the site-day-time combinations
+time.combo <- VP.Annotations %>% 
+  pivot_longer(`10`:`3600`, names_to = "Time.Window", values_to = "VP") %>%
+  mutate(Time.Window = as.numeric(Time.Window)) %>% 
+  select(Site, Day, Time.Window) %>% 
+  distinct()
+
+
+# initializing loop to convert 10 s windows to the appropriate 60 s window
+# defining the bounds of our windows and recording length
+window.start <- 0
+window.end <- 60
+window.length <- 60
+max.time <- 3600
+
+time.combo <- time.combo %>% 
+  mutate(Time.Minute = NA)
 
 while(window.start < max.time) {
   
-  # create a new column in Annotations to populate with vocal presence/abscence
-  Annotations[, ncol(Annotations) + 1] <- NA
-  names(Annotations)[ncol(Annotations)] <- paste0("Time.Window.", window.end)
-  
-  for(i in nrow(Annotations)) {
-    if(((Annotations$Start[i] >= window.start) & (Annotations$End[i] < window.end)) | # annotation lies completely within window
-       ((Annotations$Start[i] < window.start) & (Annotations$End[i] >= window.start) & (Annotations$End[i] < window.end)) | # annotation only intersects lower window bound
-       ((Annotations$Start[i] >= window.start) & (Annotations$Start[i] < window.end) & (Annotations$End[i] >= window.end)) | #annotation only intersects upper window bound
-       ((Annotations$Start[i] < window.start) & (Annotations$End[i] >= window.end))) # annotation completely overlaps window
-      {Annotations[i, ncol(Annotations)] <- 1}
-    else {Annotations[i, ncol(Annotations)] <- 0}
+  for(i in 1:nrow(time.combo)) {
+    if((time.combo$Time.Window[i] > window.start) & (time.combo$Time.Window[i] <= window.end))
+    {time.combo$Time.Minute[i] <- window.end}
+    else {time.combo$Time.Minute[i] <- time.combo$Time.Minute[i]}
   }
   # adjusting our counter
-  window.start <- window.start + 15
-  window.end <- window.end + 15
+  window.start <- window.start + window.length
+  window.end <- window.end + window.length
+  
+  # keep track of iteration
+  cat(paste("done with iteration", window.start, "\n"))
 }
 
 
-
-
-
-# calculating species richness at each 1-minute interval between 0600-0700
-#for(i in nrow(Annotations)) {
-#  
-#  for(j in seq(0:60)) {
-#    
-#    if(Start >= (60*j) & End < (60*(j+1))){Annotations$SR.1 <- 1} # annotation lies completely within window
-#    else if(Start < (60*j) & End >= (60*j) & End < (60*(j+1))){Annotations$SR.1 <- } # annotation only intersects lower window bound
-#    else if(Start >= (60*j) & Start < (60*(j+1)) & End >= (60*(j+1))){Annotations$SR.1 <- } # annotation only intersects upper window bound
-#    else if(Start <= (60*j) & Start >= (60*(j+1))){Annotations$SR.1 <- }
-#    else {Annotations$SR.1 <- 0} # annotation does not overlap the window
-#      
-#    }
-#  }
-#}
-
-
-
-
-# calculating vocal prevalence for each species at each 5-minute interval between 0600-0700
-# there are a total of 5 ways that an annotation can interact with a 60s time window:
-# (1) the annotation lies completely within the window
-# (2) the annotation only intersects the lower window bound
-# (3) the annotation only intersects the upper window bound
-# (4) the annotation completely overlaps the window
-# (5) the annotation lies completely outside the window
-
-VP.Annotations.5 <- Annotations %>%
-  mutate(VP.1 = if_else(End < (300*1), End - Start, # annotation lies completely within window
-                        if_else(Start < (300*1) & End >= (300*1), (300*1) - Start, 0))) %>% # annotation only intersects upper window bound
-  mutate(VP.2 = if_else(Start >= (300*1) & End < (300*2), End - Start, # annotation lies completely within window
-                        if_else(Start < (300*1) & End >= (300*1) & End < (300*2), End - (300*1), # annotation only intersects lower window bound
-                                if_else(Start >= (300*1) & Start < (300*2) & End >= (300*2), (300*2) - Start, # annotation only intersects upper window bound
-                                        if_else(Start <= (300*1) & Start >= (300*2), 300, 0))))) %>% # annotation completely overlaps window
-  mutate(VP.3 = if_else(Start >= (300*2) & End < (300*3), End - Start,
-                        if_else(Start < (300*2) & End >= (300*2) & End < (300*3), End - (300*2),
-                                if_else(Start >= (300*2) & Start < (300*3) & End >= (300*3), (300*3) - Start,
-                                        if_else(Start <= (300*2) & Start >= (300*3), 300, 0))))) %>%
-  mutate(VP.4 = if_else(Start >= (300*3) & End < (300*4), End - Start,
-                        if_else(Start < (300*3) & End >= (300*3) & End < (300*4), End - (300*3),
-                                if_else(Start >= (300*3) & Start < (300*4) & End >= (300*4), (300*4) - Start,
-                                        if_else(Start <= (300*3) & Start >= (300*4), 300, 0))))) %>%
-  mutate(VP.5 = if_else(Start >= (300*4) & End < (300*5), End - Start,
-                        if_else(Start < (300*4) & End >= (300*4) & End < (300*5), End - (300*4),
-                                if_else(Start >= (300*4) & Start < (300*5) & End >= (300*5), (300*5) - Start,
-                                        if_else(Start <= (300*4) & Start >= (300*5), 300, 0))))) %>%
-  mutate(VP.6 = if_else(Start >= (300*5) & End < (300*6), End - Start,
-                        if_else(Start < (300*5) & End >= (300*5) & End < (300*6), End - (300*5),
-                                if_else(Start >= (300*5) & Start < (300*6) & End >= (300*6), (300*6) - Start,
-                                        if_else(Start <= (300*5) & Start >= (300*6), 300, 0))))) %>%
-  mutate(VP.7 = if_else(Start >= (300*6) & End < (300*7), End - Start,
-                        if_else(Start < (300*6) & End >= (300*6) & End < (300*7), End - (300*6),
-                                if_else(Start >= (300*6) & Start < (300*7) & End >= (300*7), (300*7) - Start,
-                                        if_else(Start <= (300*6) & Start >= (300*7), 300, 0))))) %>%
-  mutate(VP.8 = if_else(Start >= (300*7) & End < (300*8), End - Start,
-                        if_else(Start < (300*7) & End >= (300*7) & End < (300*8), End - (300*7),
-                                if_else(Start >= (300*7) & Start < (300*8) & End >= (300*8), (300*8) - Start,
-                                        if_else(Start <= (300*7) & Start >= (300*8), 300, 0))))) %>%
-  mutate(VP.9 = if_else(Start >= (300*8) & End < (300*9), End - Start,
-                        if_else(Start < (300*8) & End >= (300*8) & End < (300*9), End - (300*8),
-                                if_else(Start >= (300*8) & Start < (300*9) & End >= (300*9), (300*9) - Start,
-                                        if_else(Start <= (300*8) & Start >= (300*9), 300, 0))))) %>%
-  mutate(VP.10 = if_else(Start >= (300*9) & End < (300*10), End - Start,
-                         if_else(Start < (300*9) & End >= (300*9) & End < (300*10), End - (300*9),
-                                 if_else(Start >= (300*9) & Start < (300*10) & End >= (300*10), (300*10) - Start,
-                                         if_else(Start <= (300*9) & Start >= (300*10), 300, 0))))) %>%
-  mutate(VP.11 = if_else(Start >= (300*10) & End < (300*11), End - Start,
-                         if_else(Start < (300*10) & End >= (300*10) & End < (300*11), End - (300*10),
-                                 if_else(Start >= (300*10) & Start < (300*11) & End >= (300*11), (300*11) - Start,
-                                         if_else(Start <= (300*10) & Start >= (300*11), 300, 0))))) %>%
-  mutate(VP.12 = if_else(Start >= (300*11) & End < (300*12), End - Start,
-                         if_else(Start < (300*11) & End >= (300*11) & End < (300*11), End - (300*11),
-                                 if_else(Start >= (300*11) & Start < (300*12) & End >= (300*12), (300*12) - Start,
-                                         if_else(Start <= (300*11) & Start >= (300*12), 300, 0))))) %>% 
-  pivot_longer(c(VP.1, VP.2, VP.3, VP.4, VP.5, VP.6, VP.7, VP.8, VP.9, VP.10, VP.11, VP.12),
-               names_to = "Time.Window", values_to = "VP") %>% 
-  mutate(Time.Window = if_else(Time.Window == "VP.1", 1,
-                               if_else(Time.Window == "VP.2", 2,
-                                       if_else(Time.Window == "VP.3", 3,
-                                               if_else(Time.Window == "VP.4", 4,
-                                                       if_else(Time.Window == "VP.5", 5,
-                                                               if_else(Time.Window == "VP.6", 6,
-                                                                       if_else(Time.Window == "VP.7", 7,
-                                                                               if_else(Time.Window == "VP.8", 8,
-                                                                                       if_else(Time.Window == "VP.9", 9,
-                                                                                               if_else(Time.Window == "VP.10", 10,
-                                                                                                       if_else(Time.Window == "VP.11", 11, 12))))))))))))
-
-VP.Day <- Annotations %>% 
+# dummy df that represents the entire community at Inkaterra
+community <- VP.Annotations %>%
+  pivot_longer(`10`:`3600`, names_to = "Time.Window", values_to = "VP") %>%
+  mutate(Time.Window = as.numeric(Time.Window)) %>%
   # excluding individuals that were not identified with 100% confidence
-  filter(exclusion.code <= 3) %>% 
-  mutate(VP = End - Start) %>% 
-  # calculating species richness per day per site
-  group_by(Site, Day, Species) %>% 
-  summarize(VP = sum(VP))
+  filter(exclusion.code <= 3) %>%
+  select(Species, Time.Window) %>%
+  distinct()
 
-VP.Window.5 <- VP.Annotations.5 %>% 
-  # excluding individuals that were not identified with 100% confidence
-  filter(exclusion.code <= 3) %>% 
-  # calculating species richness per time window per day per site
-  group_by(Site, Day, Time.Window, Species) %>% 
-  summarize(VP = round(sum(VP))) # temporarily making these integer values for poisson distribution
+VP.filler <- left_join(time.combo, community, by = c("Time.Window"))
 
 # putting everything together
-VP.Window.5 <- left_join(VP.Window.5, SiteData, by = c("Site", "Day"))
+VP.Window.10 <- left_join(VP.filler, VP.Window, by = c("Site", "Day", "Species", "Time.Window")) %>% 
+  mutate(VP = replace_na(VP, 0)) %>% 
+  left_join(SiteData, by = c("Site", "Day")) %>% 
+  mutate(Time.Window = as.numeric(Time.Window))
+ #%>% spread(Time.Window, VP)
+
+# creating vocal prevalence df
+VP.Window.60 <- VP.Window.10 %>% 
+  group_by(Site, Day, Species, Time.Minute) %>% 
+  summarize(VP = sum(VP)) %>%
+  left_join(SiteData, by = c("Site", "Day")) %>% 
+  rename(Time.Window = Time.Minute)
 
 # DATA VISUALIZATION ------------------------------------------------------
 library(ggpubr)
@@ -496,54 +303,51 @@ library(multcomp)
 
 # OUTLIERS & NORMALITY OF RESPONSE VARIABLES -----------------------------------
 # This distribution is to be expected when dealing with count data/ many zero counts
-ggdensity(VP.Day$VP, xlab = "Vocal Prevalence") # looks horrible
-ggqqplot(VP.Day$VP, ylab = "Vocal Prevalence") # looks horrible
-shapiro.test(VP.Day$VP) # W = 0.51073, p-value < 2.2e-16, not normal
 
-ggdensity(VP.Window.5$VP, xlab = "Vocal Prevalence") # looks horrible
-ggqqplot(VP.Window.5$VP, ylab = "Vocal Prevalence") # tails stray from normal
+ggdensity(VP.Window.10$VP, xlab = "Vocal Presence") # looks great
+gghistogram(VP.Window.10$VP, xlab = "Vocal Presence")
+ggqqplot(VP.Window.10$VP, ylab = "Vocal Presence") # tails stray from normal
+shapiro.test(VP.Window.10$VP) # W = 0.97989, p-value = 4.43e-11, not normal
+
+ggdensity(VP.Window.60$VP, xlab = "Vocal Prevalence") # looks great
+gghistogram(VP.Window.60$VP, xlab = "Vocal Prevalence")
+ggqqplot(VP.Window.60$VP, ylab = "Vocal Prevalence") # tails stray from normal
+shapiro.test(VP.Window.60$VP) # W = 0.97989, p-value = 4.43e-11, not normal
 
 # VOCAL PREVALENCE MODEL -------------------------------------------------------
 
-# can't get this to converge
-#VPmodel <- glmmTMB(VP ~ Time.Window*Day*Site + (1 | Species),
-#                   zi = ~ Time.Window*Day*Site,
-#                   data = VP.Window.5, family = truncated_poisson, REML = F)
+VPmodel.10 <- glmmTMB(VP ~ Time.Window + Day + Hab2 + Edge.Distance +
+                        (1 | Site) + (1 | Species),
+                      data = VP.Window.10, family = "binomial", REML = F)
 
-VPmodel <- glmmTMB(VP ~ Time.Window + Day + Site + (1 | Species),
-                   zi = ~ Time.Window + Day + Site,
-                   data = VP.Window.5, family = truncated_poisson, REML = F)
+VPmodel.10 <- glmmTMB(VP ~ Time.Window*Day + Hab2 + Edge.Distance + (1 | Site),
+                      data = SR.Window.60, family = "binomial", REML = F)
 
-VPmodel <- glmmTMB(VP ~ Time.Window + Day + Hab3 + (1 | Species) + (1 | Site),
-                   zi = ~ Time.Window + Day + Hab3,
-                   data = VP.Window.5, family = truncated_poisson, REML = F)
-
-#SRmodel <- glmmTMB(Species.Richness.Window ~ Hab2 + Edge.Distance +
-#                     (1 | Day/Time.Window) + (1 | Site),
-#                   data = WindowData, family = "gaussian", REML = F)
-
-summary(VPmodel)
-as.data.frame(confint(VPmodel)) %>% 
+summary(VPmodel.10)
+as.data.frame(confint(VPmodel.10)) %>% 
   mutate(Estimate = exp(Estimate), `2.5 %` = exp(`2.5 %`), `97.5 %` = exp(`97.5 %`))
-performance::r2(VPmodel)
-car::Anova(VPmodel, type = 3)
+performance::r2(VPmodel.10)
+car::Anova(VPmodel.10, type = 3)
 
-## global species richness model
-#SRmodel <- glmmTMB(Species.Richness.Day ~ Day*Site,
-#                   data = SpeciesRichnessDay, family = "gaussian", REML = F)
-#
-#summary(SRmodel)
-#as.data.frame(confint(SRmodel)) %>% 
-#  mutate(Estimate = exp(Estimate), `2.5 %` = exp(`2.5 %`), `97.5 %` = exp(`97.5 %`))
-#performance::r2(SRmodel)
-#car::Anova(SRmodel, type = 3)
+
+VPmodel.60 <- glmmTMB(cbind(VP, 6) ~ Time.Window*Day + Hab2 +
+                      (1 + Day | Site) + (1 + Time.Window*Day | Species)
+                      ,
+                      data = VP.Window.60, family = "binomial", REML = F)
+
+summary(VPmodel.60)
+as.data.frame(confint(VPmodel.60)) %>% 
+  mutate(Estimate = exp(Estimate), `2.5 %` = exp(`2.5 %`), `97.5 %` = exp(`97.5 %`))
+performance::r2(VPmodel.60)
+car::Anova(VPmodel.10, type = 3)
+
 
 # CHECKING MODEL ASSUMPTIONS -------------------------------------
 # Checking for homogeneity of variance & normality of residuals
-mean(residuals(VPmodel)) # VERY close to 0
+mean(residuals(VPmodel.10)) # VERY close to 0
 
-simulateResiduals(VPmodel, plot = T, refit = F, use.u = T)
-runs.test(residuals(VPmodel)) # W = 0.99464, p-value = 0.6516, normal!
+simulateResiduals(VPmodel.10, plot = T, refit = F, use.u = T)
+runs.test(residuals(VPmodel.10)) # W = 0.99464, p-value = 0.6516, normal!
 # residual plots look okay
 
 ## Checking for autocorrelation/independence
