@@ -59,7 +59,7 @@ while(window.start < max.time) {
 SR.Window <- SR.Annotations %>% 
   pivot_longer(`60`:`3600`, names_to = "Time.Window", values_to = "Presence") %>%
   # excluding individuals that were not identified with 100% confidence
-  filter(exclusion.code <= 3) %>% 
+  filter(exclusion.code < 3) %>% 
   # calculating species richness per time window per day per site
   filter(Presence == 1) %>%
   group_by(Site, Day, Time.Window) %>% 
@@ -69,7 +69,7 @@ SR.Window <- SR.Annotations %>%
 SR.filler <- SR.Annotations %>% 
   pivot_longer(`60`:`3600`, names_to = "Time.Window", values_to = "Presence") %>%
   # excluding individuals that were not identified with 100% confidence
-  filter(exclusion.code <= 3) %>% 
+  filter(exclusion.code < 3) %>% 
   select(Site, Day, Time.Window) %>% 
   distinct()
 
